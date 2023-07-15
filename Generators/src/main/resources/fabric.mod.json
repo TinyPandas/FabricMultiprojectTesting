@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "multiproject-generators",
+  "version": "${version}",
+  "name": "Multiproject Generators",
+  "description": "MP Gens hopefully.",
+  "entrypoints": {
+    "main": [
+      "multiproject.generators.Generators"
+    ],
+    "client": [
+      "multiproject.generators.GeneratorsClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "fabric-api": ">=0.82.1",
+    "minecraft": ">=1.20.1- <1.20.2-",
+    "multiproject": "*"
+  },
+  "authors": [
+    "TinyPanda"
+  ]
+}

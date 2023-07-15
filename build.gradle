@@ -1,0 +1,206 @@
+plugins {
+    id 'java'
+    id 'groovy'
+    id 'java-library'
+    id 'idea'
+    id 'maven-publish'
+    id 'fabric-loom' version '1.3-SNAPSHOT'
+}
+
+repositories {
+    maven {
+        name "REI"
+        url "https://maven.shedaniel.me/"
+        content {
+            includeGroup "me.shedaniel"
+            includeGroup "me.shedaniel.cloth"
+            includeGroup "dev.architectury"
+        }
+    }
+    mavenCentral()
+}
+
+def ENV = System.getenv()
+
+group = 'Multiproject'
+
+allprojects {
+    version = project.mod_version + (ENV.GITHUB_ACTIONS ? "" : "+local")
+
+    apply plugin: "fabric-loom"
+    apply plugin: "maven-publish"
+
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+
+    loom {
+        runtimeOnlyLog4j = true
+        splitEnvironmentSourceSets()
+    }
+
+    repositories {
+        maven { url "https://maven.terraformersmc.com/releases/" }
+    }
+
+    // Shared deps between MP and CoreAPI
+    dependencies {
+        minecraft "com.mojang:minecraft:${project.minecraft_version}"
+        mappings "net.fabricmc:yarn:${project.yarn_version}:v2"
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+        //Fabric api
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fapi_version}"
+
+        modApi("com.terraformersmc:modmenu:7.1.0") {
+            exclude(group: "net.fabricmc.fabric-api")
+        }
+    }
+
+    processResources {
+        inputs.property "version", project.version
+
+        filesMatching("fabric.mod.json") {
+            expand "version": project.version
+        }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        it.options.encoding = "UTF-8"
+        it.options.release = 17
+    }
+
+    java {
+        withSourcesJar()
+    }
+
+    publishing {
+        publications {
+            register("maven", MavenPublication) {
+                groupId project.name
+                artifactId project.archivesBaseName  + "-local"
+                version project.version
+
+                from components.java
+            }
+        }
+        repositories {
+            if (ENV.MAVEN_URL) {
+                maven {
+                    url ENV.MAVEN_URL
+                    credentials {
+                        username ENV.MAVEN_USERNAME
+                        password ENV.MAVEN_PASSWORD
+                    }
+                }
+            }
+        }
+    }
+}
+
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+processResources {
+    doLast {
+        // Depend on the reborn core version it was built against
+        fileTree(dir: outputs.files.asPath, include: "fabric.mod.json").each {
+            def jsonSlurper = new JsonSlurper()
+            def modJson = jsonSlurper.parseText(it.text)
+
+            modJson.depends.coreapi = "~${project.version}"
+
+            it.text = JsonOutput.toJson(modJson)
+        }
+    }
+}
+
+sourceSets {
+    // Add a data gen sourceset
+    datagen {
+        compileClasspath += main.compileClasspath
+        runtimeClasspath += main.runtimeClasspath
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+    }
+
+    main {
+        resources {
+            srcDirs += [
+                    'src/main/generated'
+            ]
+        }
+    }
+}
+
+allprojects {
+    loom {
+        mods {
+            coreapi {
+                sourceSet project(":CoreAPI").sourceSets.main
+                sourceSet project(":CoreAPI").sourceSets.client
+            }
+            multiproject {
+                sourceSet project(":").sourceSets.main
+                sourceSet project(":").sourceSets.client
+            }
+            generators {
+                sourceSet project(":Generators").sourceSets.main
+                sourceSet project(":Generators").sourceSets.client
+            }
+            "multiproject-datagen" {
+                sourceSet project(":").sourceSets.datagen
+            }
+        }
+    }
+}
+
+// MP Specific Deps
+dependencies {
+    api project(path: ":CoreAPI", configuration: "namedElements")
+    clientImplementation project(":CoreAPI").sourceSets.client.output
+
+    include project(":CoreAPI")
+
+    optionalClientDependency("me.shedaniel:RoughlyEnoughItems-fabric:${project.rei_version}", true)
+}
+
+def optionalClientDependency(String dep, runtime = true) {
+    def exclude = {
+        exclude group: "net.fabricmc.fabric-api"
+        exclude group: "net.fabricmc"
+    }
+    dependencies.modClientCompileOnly(dep, exclude)
+
+    if (runtime) {
+        dependencies.modClientRuntimeOnly(dep, exclude)
+    }
+}
+
+loom {
+    runs {
+        // Add a data gen run config
+        datagen {
+            server()
+            name "Data Generation"
+            vmArg "-Dfabric-api.datagen"
+            vmArg "-Dfabric-api.datagen.output-dir=${file("src/main/generated")}"
+            vmArg "-Dfabric-api.datagen.modid=techreborn-datagen"
+            runDir "build/datagen"
+            source sourceSets.datagen
+        }
+    }
+}
+
+runDatagen {
+    // Doesn't re-run the task when its up-to date
+    outputs.dir('src/main/generated')
+}
+
+tasks.sourcesJar.dependsOn runDatagen
+
+jar {
+    from file('src/main/generated')
+
+    dependsOn 'runDatagen'
+}
+

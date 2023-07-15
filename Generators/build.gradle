@@ -1,0 +1,8 @@
+group = 'Generators'
+
+dependencies {
+    api project(path: ":CoreAPI", configuration: "namedElements")
+    clientImplementation project(":CoreAPI").sourceSets.client.output
+
+    modImplementation project(":")
+}
